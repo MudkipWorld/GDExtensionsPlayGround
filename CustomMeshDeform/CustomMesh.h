@@ -16,6 +16,7 @@
 #include <mutex>
 #include <atomic>
 #include <vector>
+#include <map>
 #include <godot_cpp/classes/time.hpp>
 
 using namespace godot;
@@ -49,6 +50,11 @@ public:
         bottom_middle.resize(n);
         bottom_right.resize(n);
     }
+
+    int id = 0;
+
+    void set_id(const int &new_id) { id = new_id; }
+    int get_id() const { return id; }
 
 
     PackedVector2Array get_vertices() const { return vertices; }
@@ -159,11 +165,48 @@ public:
     }
 };
 
+
+class GlueGroup : public RefCounted {
+    GDCLASS(GlueGroup, RefCounted);
+
+protected:
+    static void _bind_methods();
+
+public:
+    String glue_name = "New Glue";
+    PackedInt32Array indices;     // vertices this glue affects
+    PackedVector2Array weights;   // optional influence per vertex
+    Vector2 last_position = Vector2();
+
+    int id = 0;
+
+    GlueGroup() {}
+
+    void set_id(const int &new_id) { id = new_id; }
+    int get_id() const { return id; }
+
+    void set_glue_name(const String &new_name) { glue_name = new_name; }
+    String get_glue_name() const { return glue_name; }
+
+    void set_indices(const PackedInt32Array &p) { indices = p; }
+    PackedInt32Array get_indices() const { return indices; }
+
+    void set_weights(const PackedVector2Array &p) { weights = p; }
+    PackedVector2Array get_weights() const { return weights; }
+
+    void set_last_position(const Vector2 &p) { last_position = p; }
+    Vector2 get_last_position() const { return last_position; }
+};
+
+
+
+
 class CustomMesh : public Node2D {
     GDCLASS(CustomMesh, Node2D);
 
 protected:
     static void _bind_methods();
+    void _notification(int p_what); // Added for Registry handling
 
 private:
     Vector2 deform_velocity = Vector2(0, 0);
@@ -184,6 +227,9 @@ private:
 public:
     CustomMesh();
     ~CustomMesh();
+    
+    static std::vector<CustomMesh*> mesh_registry;
+
 
     Ref<Texture2D> texture;
     Node *actor = nullptr;
@@ -192,6 +238,9 @@ public:
     int selected_vertex = -1;
     float deform_x = 0.0f;
     float deform_y = 0.5f;
+
+    int mesh_id = 0;
+    bool is_warp_mesh = false;
 
     PackedVector2Array original_vertices;
     PackedVector2Array base_vertices;
@@ -204,6 +253,27 @@ public:
     std::vector<Ref<DeformLayer>> deform_layers;
     Ref<DeformLayer> get_layer(int index) const;
     void set_layer(int index, const Ref<DeformLayer> &layer);
+
+
+    Array glues;
+    Array warps;
+
+
+    void set_mesh_id(int id) { mesh_id = id; }
+    int get_mesh_id() { return mesh_id; }
+
+    void set_is_warp_mesh(bool val) { is_warp_mesh = val; }
+    bool get_is_warp_mesh() { return is_warp_mesh; }
+
+
+
+    Array get_warp();
+    void set_warp(const Array &arr);
+
+
+    Array get_glue();
+    void set_glue(const Array &arr);
+
 
     Array get_layers() const;
     void set_layers(const Array &arr);
@@ -283,7 +353,14 @@ public:
     }
 
 
-void update_physics(double delta, bool preview_physics);
+    void update_physics(double delta, bool preview_physics);
+
+    static std::vector<Ref<GlueGroup>> glue_groups;
+
+    static Ref<GlueGroup> add_glue_group();
+    static void remove_glue_group(int index);
+    static Array get_glue_groups();
+    static void set_glue_groups(const Array &arr);
 
 private:
     static double move_toward_double(double current, double target, double max_delta);
@@ -325,40 +402,31 @@ inline void apply_bounce_modifier(DeformLayer &layer, double dt) {
     if (layer.motion != DeformLayer::MotionType::BOUNCY)
         return;
 
-    // Rest position
     const Vector2 rest(0.5f, 0.5f);
 
-    // Displacement from rest
     Vector2 displacement = layer.bounce_lerp - rest;
 
-    // Spring acceleration
     Vector2 accel;
     accel.x = (-layer.stiffness.x * displacement.x) / std::max(layer.mass.x, 1e-6f);
     accel.y = (-layer.stiffness.y * displacement.y) / std::max(layer.mass.y, 1e-6f);
 
-    // Optional gravity
     accel.y += layer.gravity;
 
-    // Integrate velocity
     layer.velocity   += accel.x * float(dt);
     layer.velocity_v += accel.y * float(dt);
 
-    // Damping
     layer.velocity   *= std::exp(-layer.damping.x * dt);
     layer.velocity_v *= std::exp(-layer.damping.y * dt);
 
-    // Integrate position
     layer.bounce_lerp.x += layer.velocity * float(dt);
     layer.bounce_lerp.y += layer.velocity_v * float(dt);
 
-    // Optional sine wobble (tiny secondary effect)
     if (layer.sine_amplitude > 0.0f) {
         float t = Time::get_singleton()->get_ticks_msec() * 0.001f;
         float wobble = sinf(t * layer.sine_speed) * layer.sine_amplitude;
         layer.bounce_lerp += Vector2(wobble, wobble);
     }
 
-    // Clamp to [0,1] to avoid runaway
     layer.bounce_lerp.x = Math::clamp(layer.bounce_lerp.x, 0.0f, 1.0f);
     layer.bounce_lerp.y = Math::clamp(layer.bounce_lerp.y, 0.0f, 1.0f);
 }

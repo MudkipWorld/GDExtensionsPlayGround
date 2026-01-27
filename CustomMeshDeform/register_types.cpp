@@ -15,7 +15,8 @@ void initialize_gdextension_types(ModuleInitializationLevel p_level)
         return;
     }
     GDREGISTER_CLASS(CustomMesh);
-    GDREGISTER_CLASS(DeformLayer); // <-- Add this
+    GDREGISTER_CLASS(DeformLayer);
+	GDREGISTER_CLASS(GlueGroup); 
 }
 
 

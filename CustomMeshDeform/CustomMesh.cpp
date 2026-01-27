@@ -11,198 +11,313 @@
 
 using namespace godot;
 
-static inline bool has_point(const Vector2 *arr, int size, int i) {
-    return arr && i < size;
-}
+    static inline bool has_point(const Vector2 *arr, int size, int i) {
+        return arr && i < size;
+    }
 
 
-std::recursive_mutex CustomMesh::deform_mutex;
-
-void DeformLayer::_bind_methods() {
-    ClassDB::bind_method(D_METHOD("resize", "n"), &DeformLayer::resize);
-
-	#define BIND_VECTOR2_ARRAY_DEFORM(prop) \
-		ClassDB::bind_method(D_METHOD("set_"#prop,"value"), &DeformLayer::set_##prop); \
-		ClassDB::bind_method(D_METHOD("get_"#prop), &DeformLayer::get_##prop); \
-		ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR2_ARRAY,#prop), "set_"#prop, "get_"#prop)
-
-	#define BIND_INT32_ARRAY_DEFORM(prop) \
-		ClassDB::bind_method(D_METHOD("set_"#prop,"value"), &DeformLayer::set_##prop); \
-		ClassDB::bind_method(D_METHOD("get_"#prop), &DeformLayer::get_##prop); \
-		ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY,#prop), "set_"#prop, "get_"#prop)
+    std::recursive_mutex CustomMesh::deform_mutex;
+    std::vector<Ref<GlueGroup>> CustomMesh::glue_groups;
+    
+    std::vector<CustomMesh*>  CustomMesh::mesh_registry;
 
 
-    ClassDB::bind_method(D_METHOD("set_strength","value"), &DeformLayer::set_strength);
-    ClassDB::bind_method(D_METHOD("get_strength"), &DeformLayer::get_strength);
-
-    ClassDB::bind_method(D_METHOD("set_target_strength","value"), &DeformLayer::set_target_strength);
-    ClassDB::bind_method(D_METHOD("get_target_strength"), &DeformLayer::get_target_strength);
-
-    ClassDB::bind_method(D_METHOD("set_velocity","value"), &DeformLayer::set_velocity);
-    ClassDB::bind_method(D_METHOD("get_velocity"), &DeformLayer::get_velocity);
-
-    ClassDB::bind_method(D_METHOD("set_damping","value"), &DeformLayer::set_damping);
-    ClassDB::bind_method(D_METHOD("get_damping"), &DeformLayer::get_damping);
-
-    ClassDB::bind_method(D_METHOD("set_stiffness","value"), &DeformLayer::set_stiffness);
-    ClassDB::bind_method(D_METHOD("get_stiffness"), &DeformLayer::get_stiffness);
-
-    ClassDB::bind_method(D_METHOD("set_gravity","value"), &DeformLayer::set_gravity);
-    ClassDB::bind_method(D_METHOD("get_gravity"), &DeformLayer::get_gravity);
-
-    ClassDB::bind_method(D_METHOD("set_mass","value"), &DeformLayer::set_mass);
-    ClassDB::bind_method(D_METHOD("get_mass"), &DeformLayer::get_mass);
-
-    ClassDB::bind_method(D_METHOD("set_sine_speed","value"), &DeformLayer::set_sine_speed);
-    ClassDB::bind_method(D_METHOD("get_sine_speed"), &DeformLayer::get_sine_speed);
-
-    ClassDB::bind_method(D_METHOD("set_sine_amplitude","value"), &DeformLayer::set_sine_amplitude);
-    ClassDB::bind_method(D_METHOD("get_sine_amplitude"), &DeformLayer::get_sine_amplitude);
+    void GlueGroup::_bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_indices","value"), &GlueGroup::set_indices);
+        ClassDB::bind_method(D_METHOD("get_indices"), &GlueGroup::get_indices);
+        ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY,"indices"), "set_indices","get_indices");
 
 
-    ClassDB::bind_method(D_METHOD("set_noise_speed","value"), &DeformLayer::set_noise_speed);
-    ClassDB::bind_method(D_METHOD("get_noise_speed"), &DeformLayer::get_noise_speed);
+        ClassDB::bind_method(D_METHOD("set_id","new_id"), &GlueGroup::set_id);
+        ClassDB::bind_method(D_METHOD("get_id"), &GlueGroup::get_id);
+        ADD_PROPERTY(PropertyInfo(Variant::INT,"id"), "set_id","get_id");
 
-    ClassDB::bind_method(D_METHOD("set_noise_scale","value"), &DeformLayer::set_noise_scale);
-    ClassDB::bind_method(D_METHOD("get_noise_scale"), &DeformLayer::get_noise_scale);
+        ClassDB::bind_method(D_METHOD("set_glue_name","new_name"), &GlueGroup::set_glue_name);
+        ClassDB::bind_method(D_METHOD("get_glue_name"), &GlueGroup::get_glue_name);
+        ADD_PROPERTY(PropertyInfo(Variant::STRING,"glue_name"), "set_glue_name","get_glue_name");
 
-    ClassDB::bind_method(D_METHOD("set_follow_lerp","value"), &DeformLayer::set_follow_lerp);
-    ClassDB::bind_method(D_METHOD("get_follow_lerp"), &DeformLayer::get_follow_lerp);
-    ClassDB::bind_method(D_METHOD("set_motion","value"), &DeformLayer::set_motion);
-    ClassDB::bind_method(D_METHOD("get_motion"), &DeformLayer::get_motion);   
+        ClassDB::bind_method(D_METHOD("set_weights","value"), &GlueGroup::set_weights);
+        ClassDB::bind_method(D_METHOD("get_weights"), &GlueGroup::get_weights);
+        ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR2_ARRAY,"weights"), "set_weights","get_weights");
 
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"strength"), "set_strength","get_strength");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"target_strength"), "set_target_strength","get_target_strength");
+        ClassDB::bind_method(D_METHOD("set_last_position","value"), &GlueGroup::set_last_position);
+        ClassDB::bind_method(D_METHOD("get_last_position"), &GlueGroup::get_last_position);
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"last_position"), "set_last_position","get_last_position");
+    }
 
-    ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"external_velocity"), "set_velocity","get_velocity");
-    ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"damping"), "set_damping","get_damping");
-    ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"stiffness"), "set_stiffness","get_stiffness");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"gravity"), "set_gravity","get_gravity");
-    ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"mass"), "set_mass","get_mass");
+    void DeformLayer::_bind_methods() {
 
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"sine_speed"), "set_sine_speed","get_sine_speed");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"sine_amplitude"), "set_sine_amplitude","get_sine_amplitude");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"noise_speed"), "set_noise_speed","get_noise_speed");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"noise_scale"), "set_noise_scale","get_noise_scale");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"follow_lerp"), "set_follow_lerp","get_follow_lerp");
 
-    ADD_PROPERTY(
-        PropertyInfo(
-            Variant::INT,
-            "motion",
-            PROPERTY_HINT_ENUM,
-            "Spring,Sine,Noise,Follow,Custom"
-        ),
-        "set_motion",
-        "get_motion"
+        ClassDB::bind_method(D_METHOD("set_id","new_id"), &DeformLayer::set_id);
+        ClassDB::bind_method(D_METHOD("get_id"), &DeformLayer::get_id);
+        ADD_PROPERTY(PropertyInfo(Variant::INT,"id"), "set_id","get_id");
+
+
+        ClassDB::bind_method(D_METHOD("resize", "n"), &DeformLayer::resize);
+
+        #define BIND_VECTOR2_ARRAY_DEFORM(prop) \
+            ClassDB::bind_method(D_METHOD("set_"#prop,"value"), &DeformLayer::set_##prop); \
+            ClassDB::bind_method(D_METHOD("get_"#prop), &DeformLayer::get_##prop); \
+            ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR2_ARRAY,#prop), "set_"#prop, "get_"#prop)
+
+        #define BIND_INT32_ARRAY_DEFORM(prop) \
+            ClassDB::bind_method(D_METHOD("set_"#prop,"value"), &DeformLayer::set_##prop); \
+            ClassDB::bind_method(D_METHOD("get_"#prop), &DeformLayer::get_##prop); \
+            ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY,#prop), "set_"#prop, "get_"#prop)
+
+
+        ClassDB::bind_method(D_METHOD("set_strength","value"), &DeformLayer::set_strength);
+        ClassDB::bind_method(D_METHOD("get_strength"), &DeformLayer::get_strength);
+
+        ClassDB::bind_method(D_METHOD("set_target_strength","value"), &DeformLayer::set_target_strength);
+        ClassDB::bind_method(D_METHOD("get_target_strength"), &DeformLayer::get_target_strength);
+
+        ClassDB::bind_method(D_METHOD("set_velocity","value"), &DeformLayer::set_velocity);
+        ClassDB::bind_method(D_METHOD("get_velocity"), &DeformLayer::get_velocity);
+
+        ClassDB::bind_method(D_METHOD("set_damping","value"), &DeformLayer::set_damping);
+        ClassDB::bind_method(D_METHOD("get_damping"), &DeformLayer::get_damping);
+
+        ClassDB::bind_method(D_METHOD("set_stiffness","value"), &DeformLayer::set_stiffness);
+        ClassDB::bind_method(D_METHOD("get_stiffness"), &DeformLayer::get_stiffness);
+
+        ClassDB::bind_method(D_METHOD("set_gravity","value"), &DeformLayer::set_gravity);
+        ClassDB::bind_method(D_METHOD("get_gravity"), &DeformLayer::get_gravity);
+
+        ClassDB::bind_method(D_METHOD("set_mass","value"), &DeformLayer::set_mass);
+        ClassDB::bind_method(D_METHOD("get_mass"), &DeformLayer::get_mass);
+
+        ClassDB::bind_method(D_METHOD("set_sine_speed","value"), &DeformLayer::set_sine_speed);
+        ClassDB::bind_method(D_METHOD("get_sine_speed"), &DeformLayer::get_sine_speed);
+
+        ClassDB::bind_method(D_METHOD("set_sine_amplitude","value"), &DeformLayer::set_sine_amplitude);
+        ClassDB::bind_method(D_METHOD("get_sine_amplitude"), &DeformLayer::get_sine_amplitude);
+
+
+        ClassDB::bind_method(D_METHOD("set_noise_speed","value"), &DeformLayer::set_noise_speed);
+        ClassDB::bind_method(D_METHOD("get_noise_speed"), &DeformLayer::get_noise_speed);
+
+        ClassDB::bind_method(D_METHOD("set_noise_scale","value"), &DeformLayer::set_noise_scale);
+        ClassDB::bind_method(D_METHOD("get_noise_scale"), &DeformLayer::get_noise_scale);
+
+        ClassDB::bind_method(D_METHOD("set_follow_lerp","value"), &DeformLayer::set_follow_lerp);
+        ClassDB::bind_method(D_METHOD("get_follow_lerp"), &DeformLayer::get_follow_lerp);
+        ClassDB::bind_method(D_METHOD("set_motion","value"), &DeformLayer::set_motion);
+        ClassDB::bind_method(D_METHOD("get_motion"), &DeformLayer::get_motion);   
+
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"strength"), "set_strength","get_strength");
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"target_strength"), "set_target_strength","get_target_strength");
+
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"external_velocity"), "set_velocity","get_velocity");
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"damping"), "set_damping","get_damping");
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"stiffness"), "set_stiffness","get_stiffness");
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"gravity"), "set_gravity","get_gravity");
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"mass"), "set_mass","get_mass");
+
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"sine_speed"), "set_sine_speed","get_sine_speed");
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"sine_amplitude"), "set_sine_amplitude","get_sine_amplitude");
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"noise_speed"), "set_noise_speed","get_noise_speed");
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"noise_scale"), "set_noise_scale","get_noise_scale");
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"follow_lerp"), "set_follow_lerp","get_follow_lerp");
+
+        ADD_PROPERTY(
+            PropertyInfo(
+                Variant::INT,
+                "motion",
+                PROPERTY_HINT_ENUM,
+                "Spring,Sine,Noise,Follow,Custom"
+            ),
+            "set_motion",
+            "get_motion"
+        );
+
+        BIND_VECTOR2_ARRAY_DEFORM(vertices);
+        BIND_VECTOR2_ARRAY_DEFORM(top_left);
+        BIND_VECTOR2_ARRAY_DEFORM(middle_left);
+        BIND_VECTOR2_ARRAY_DEFORM(bottom_left);
+
+        BIND_VECTOR2_ARRAY_DEFORM(top_middle);
+        BIND_VECTOR2_ARRAY_DEFORM(center);
+        BIND_VECTOR2_ARRAY_DEFORM(bottom_middle);
+
+        BIND_VECTOR2_ARRAY_DEFORM(top_right);
+        BIND_VECTOR2_ARRAY_DEFORM(middle_right);
+        BIND_VECTOR2_ARRAY_DEFORM(bottom_right);
+
+    }
+
+    static inline Vector2 fast_lerp(const Vector2 &a, const Vector2 &b, float t) {
+        return Vector2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+    }
+
+    static inline bool fast_tri_valid(const Vector2 &a, const Vector2 &b, const Vector2 &c) {
+        float cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        return Math::abs(cross) > 0.001f;
+    }
+
+    static inline double move_toward_fast(double current, double target, double max_delta) {
+        double diff = target - current;
+        if (Math::abs(diff) <= max_delta) return target;
+        return current + (diff > 0.0 ? max_delta : -max_delta);
+    }
+
+    CustomMesh::CustomMesh() {
+        _cached_tri_points.resize(3);
+        _temp_tri_uvs.resize(3);
+        _cached_tri_uvs.resize(0);
+        _last_vertices_used.resize(0);
+        _vertices_dirty.store(true, std::memory_order_relaxed);
+        mesh_registry.push_back(this);
+
+    }
+
+    CustomMesh::~CustomMesh() {
+    mesh_registry.erase(
+        std::remove(mesh_registry.begin(), mesh_registry.end(), this),
+        mesh_registry.end()
     );
+    }
 
-    BIND_VECTOR2_ARRAY_DEFORM(vertices);
-	BIND_VECTOR2_ARRAY_DEFORM(top_left);
-	BIND_VECTOR2_ARRAY_DEFORM(middle_left);
-	BIND_VECTOR2_ARRAY_DEFORM(bottom_left);
+    void CustomMesh::_notification(int p_what) {
+    }
 
-	BIND_VECTOR2_ARRAY_DEFORM(top_middle);
-	BIND_VECTOR2_ARRAY_DEFORM(center);
-	BIND_VECTOR2_ARRAY_DEFORM(bottom_middle);
+    void CustomMesh::_bind_methods() {
 
-	BIND_VECTOR2_ARRAY_DEFORM(top_right);
-	BIND_VECTOR2_ARRAY_DEFORM(middle_right);
-	BIND_VECTOR2_ARRAY_DEFORM(bottom_right);
+        ClassDB::bind_method(D_METHOD("remove_deform_layer", "index"), &CustomMesh::remove_deform_layer);
+        ClassDB::bind_method(D_METHOD("add_deform_layer"), &CustomMesh::add_deform_layer);
+        ClassDB::bind_method(D_METHOD("get_layer_count"), &CustomMesh::get_layer_count);
+        ClassDB::bind_method(D_METHOD("deformations_3x3","u","v"), &CustomMesh::compute_interpolated_vertices);
+        ClassDB::bind_method(D_METHOD("sync_deformation_arrays"), &CustomMesh::sync_deformation_arrays);
+        ClassDB::bind_method(D_METHOD("toggle_mesh_view"), &CustomMesh::toggle_mesh_view);
+        ClassDB::bind_method(D_METHOD("add_internal_point","p"), &CustomMesh::add_internal_point);
+        ClassDB::bind_method(D_METHOD("remove_nearest_internal_point","p","max_dist"), &CustomMesh::remove_nearest_internal_point);
+        ClassDB::bind_method(D_METHOD("apply_wobble_to_deformer","wobble","delta","amp","lerp_speed"), &CustomMesh::apply_wobble_to_deformer);
+        ClassDB::bind_method(D_METHOD("is_triangle_valid","a","b","c"), &CustomMesh::is_triangle_valid);
+        ClassDB::bind_method(D_METHOD("is_inside_base","p"), &CustomMesh::is_inside_base);
+        ClassDB::bind_method(D_METHOD("update_physics", "delta"), &CustomMesh::update_physics);
 
+        ClassDB::bind_method(D_METHOD("get_layer", "index"), &CustomMesh::get_layer);
+        ClassDB::bind_method(D_METHOD("set_layer", "index", "layer"), &CustomMesh::set_layer);
+        ClassDB::bind_method(D_METHOD("get_layers"), &CustomMesh::get_layers);
+        ClassDB::bind_method(D_METHOD("set_layers", "layers"), &CustomMesh::set_layers);
+
+        ClassDB::bind_method(D_METHOD("set_texture","texture"), &CustomMesh::set_texture);
+        ClassDB::bind_method(D_METHOD("get_texture"), &CustomMesh::get_texture);
+        ADD_PROPERTY(PropertyInfo(Variant::OBJECT,"texture",PROPERTY_HINT_RESOURCE_TYPE,"Texture2D"), "set_texture","get_texture");
+
+        ClassDB::bind_method(D_METHOD("set_actor","actor"), &CustomMesh::set_actor);
+        ClassDB::bind_method(D_METHOD("get_actor"), &CustomMesh::get_actor);
+        ADD_PROPERTY(PropertyInfo(Variant::OBJECT,"actor",PROPERTY_HINT_RESOURCE_TYPE,"Node"), "set_actor","get_actor");
+
+        ClassDB::bind_method(D_METHOD("set_editable","editable"), &CustomMesh::set_editable);
+        ClassDB::bind_method(D_METHOD("get_editable"), &CustomMesh::get_editable);
+        ADD_PROPERTY(PropertyInfo(Variant::BOOL,"editable"), "set_editable","get_editable");
+
+        ClassDB::bind_method(D_METHOD("set_show_deformed_mesh","value"), &CustomMesh::set_show_deformed_mesh);
+        ClassDB::bind_method(D_METHOD("get_show_deformed_mesh"), &CustomMesh::get_show_deformed_mesh);
+        ADD_PROPERTY(PropertyInfo(Variant::BOOL,"show_deformed_mesh"), "set_show_deformed_mesh","get_show_deformed_mesh");
+
+        ClassDB::bind_method(D_METHOD("set_selected_vertex","value"), &CustomMesh::set_selected_vertex);
+        ClassDB::bind_method(D_METHOD("get_selected_vertex"), &CustomMesh::get_selected_vertex);
+        ADD_PROPERTY(PropertyInfo(Variant::INT,"selected_vertex"), "set_selected_vertex","get_selected_vertex");
+
+        ClassDB::bind_method(D_METHOD("set_deform_x","value"), &CustomMesh::set_deform_x);
+        ClassDB::bind_method(D_METHOD("get_deform_x"), &CustomMesh::get_deform_x);
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"deform_x"), "set_deform_x","get_deform_x");
+
+        ClassDB::bind_method(D_METHOD("set_deform_y","value"), &CustomMesh::set_deform_y);
+        ClassDB::bind_method(D_METHOD("get_deform_y"), &CustomMesh::get_deform_y);
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"deform_y"), "set_deform_y","get_deform_y");
+
+
+        // Glue Groups
+        ClassDB::bind_static_method("CustomMesh", D_METHOD("add_glue_group"), &CustomMesh::add_glue_group);
+        ClassDB::bind_static_method("CustomMesh", D_METHOD("remove_glue_group", "index"), &CustomMesh::remove_glue_group);
+        ClassDB::bind_static_method("CustomMesh", D_METHOD("get_glue_groups"), &CustomMesh::get_glue_groups);
+        ClassDB::bind_static_method("CustomMesh", D_METHOD("set_glue_groups", "groups"), &CustomMesh::set_glue_groups);
+
+
+        ClassDB::bind_method(D_METHOD("set_mesh_id", "id"), &CustomMesh::set_mesh_id);
+        ClassDB::bind_method(D_METHOD("get_mesh_id"), &CustomMesh::get_mesh_id);
+        ClassDB::bind_method(D_METHOD("set_is_warp_mesh", "value"), &CustomMesh::set_is_warp_mesh);
+        ClassDB::bind_method(D_METHOD("get_is_warp_mesh"), &CustomMesh::get_is_warp_mesh);
+
+        ClassDB::bind_method(D_METHOD("get_warp"), &CustomMesh::get_warp);
+        ClassDB::bind_method(D_METHOD("set_warp", "warps"), &CustomMesh::set_warp);
+
+        ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "warps", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT),
+                    "set_warp", "get_warp");
+
+
+        ClassDB::bind_method(D_METHOD("get_glue"), &CustomMesh::get_glue);
+        ClassDB::bind_method(D_METHOD("set_glue", "glues"), &CustomMesh::set_glue);
+
+        ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "glues", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT),
+                    "set_glue", "get_glue");
+
+
+        #define BIND_VECTOR2_ARRAY(prop) \
+            ClassDB::bind_method(D_METHOD("set_"#prop,"value"), &CustomMesh::set_##prop); \
+            ClassDB::bind_method(D_METHOD("get_"#prop), &CustomMesh::get_##prop); \
+            ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR2_ARRAY,#prop), "set_"#prop, "get_"#prop)
+        #define BIND_INT32_ARRAY(prop) \
+            ClassDB::bind_method(D_METHOD("set_"#prop,"value"), &CustomMesh::set_##prop); \
+            ClassDB::bind_method(D_METHOD("get_"#prop), &CustomMesh::get_##prop); \
+            ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY,#prop), "set_"#prop, "get_"#prop)
+
+
+
+        BIND_VECTOR2_ARRAY(original_vertices);
+        BIND_VECTOR2_ARRAY(base_vertices);
+        BIND_VECTOR2_ARRAY(deformed_vertices);
+        BIND_VECTOR2_ARRAY(internal_vertices);
+        BIND_VECTOR2_ARRAY(interpolated_vertices);
+        BIND_INT32_ARRAY(triangles);
+    }
+
+
+    Array CustomMesh::get_warp(){
+        return warps;
+    }
+
+    void CustomMesh::set_warp(const Array &arr){
+        warps = arr;
+    }
+
+    Array CustomMesh::get_glue(){
+        return glues;
+    }
+
+    void CustomMesh::set_glue(const Array &arr){
+        glues = arr;
+    }
+
+Ref<GlueGroup> CustomMesh::add_glue_group() {
+    Ref<GlueGroup> g;
+    g.instantiate();
+    glue_groups.push_back(g);
+    return g;
 }
 
-static inline Vector2 fast_lerp(const Vector2 &a, const Vector2 &b, float t) {
-    return Vector2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+void CustomMesh::remove_glue_group(int index) {
+    if (index >= 0 && index < (int)glue_groups.size())
+        glue_groups.erase(glue_groups.begin() + index);
 }
 
-static inline bool fast_tri_valid(const Vector2 &a, const Vector2 &b, const Vector2 &c) {
-    float cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    return Math::abs(cross) > 0.001f;
+Array CustomMesh::get_glue_groups() {
+    Array arr;
+    for (auto &g : glue_groups) arr.append(g);
+    return arr;
 }
 
-static inline double move_toward_fast(double current, double target, double max_delta) {
-    double diff = target - current;
-    if (Math::abs(diff) <= max_delta) return target;
-    return current + (diff > 0.0 ? max_delta : -max_delta);
+void CustomMesh::set_glue_groups(const Array &arr) {
+    glue_groups.clear();
+    for (int i = 0; i < arr.size(); ++i) {
+        Ref<GlueGroup> g = arr[i];
+        if (g.is_valid()) glue_groups.push_back(g);
+    }
 }
 
-CustomMesh::CustomMesh() {
-    _cached_tri_points.resize(3);
-    _temp_tri_uvs.resize(3);
-    _cached_tri_uvs.resize(0);
-    _last_vertices_used.resize(0);
-    _vertices_dirty.store(true, std::memory_order_relaxed);
-}
-
-CustomMesh::~CustomMesh() {}
-
-void CustomMesh::_bind_methods() {
-
-    ClassDB::bind_method(D_METHOD("remove_deform_layer", "index"), &CustomMesh::remove_deform_layer);
-    ClassDB::bind_method(D_METHOD("add_deform_layer"), &CustomMesh::add_deform_layer);
-    ClassDB::bind_method(D_METHOD("get_layer_count"), &CustomMesh::get_layer_count);
-    ClassDB::bind_method(D_METHOD("deformations_3x3","u","v"), &CustomMesh::compute_interpolated_vertices);
-    ClassDB::bind_method(D_METHOD("sync_deformation_arrays"), &CustomMesh::sync_deformation_arrays);
-    ClassDB::bind_method(D_METHOD("toggle_mesh_view"), &CustomMesh::toggle_mesh_view);
-    ClassDB::bind_method(D_METHOD("add_internal_point","p"), &CustomMesh::add_internal_point);
-    ClassDB::bind_method(D_METHOD("remove_nearest_internal_point","p","max_dist"), &CustomMesh::remove_nearest_internal_point);
-    ClassDB::bind_method(D_METHOD("apply_wobble_to_deformer","wobble","delta","amp","lerp_speed"), &CustomMesh::apply_wobble_to_deformer);
-    ClassDB::bind_method(D_METHOD("is_triangle_valid","a","b","c"), &CustomMesh::is_triangle_valid);
-    ClassDB::bind_method(D_METHOD("is_inside_base","p"), &CustomMesh::is_inside_base);
-    ClassDB::bind_method(D_METHOD("update_physics", "delta"), &CustomMesh::update_physics);
-
-    ClassDB::bind_method(D_METHOD("get_layer", "index"), &CustomMesh::get_layer);
-    ClassDB::bind_method(D_METHOD("set_layer", "index", "layer"), &CustomMesh::set_layer);
-    ClassDB::bind_method(D_METHOD("get_layers"), &CustomMesh::get_layers);
-    ClassDB::bind_method(D_METHOD("set_layers", "layers"), &CustomMesh::set_layers);
-
-    ClassDB::bind_method(D_METHOD("set_texture","texture"), &CustomMesh::set_texture);
-    ClassDB::bind_method(D_METHOD("get_texture"), &CustomMesh::get_texture);
-    ADD_PROPERTY(PropertyInfo(Variant::OBJECT,"texture",PROPERTY_HINT_RESOURCE_TYPE,"Texture2D"), "set_texture","get_texture");
-
-    ClassDB::bind_method(D_METHOD("set_actor","actor"), &CustomMesh::set_actor);
-    ClassDB::bind_method(D_METHOD("get_actor"), &CustomMesh::get_actor);
-    ADD_PROPERTY(PropertyInfo(Variant::OBJECT,"actor",PROPERTY_HINT_RESOURCE_TYPE,"Node"), "set_actor","get_actor");
-
-    ClassDB::bind_method(D_METHOD("set_editable","editable"), &CustomMesh::set_editable);
-    ClassDB::bind_method(D_METHOD("get_editable"), &CustomMesh::get_editable);
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL,"editable"), "set_editable","get_editable");
-
-    ClassDB::bind_method(D_METHOD("set_show_deformed_mesh","value"), &CustomMesh::set_show_deformed_mesh);
-    ClassDB::bind_method(D_METHOD("get_show_deformed_mesh"), &CustomMesh::get_show_deformed_mesh);
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL,"show_deformed_mesh"), "set_show_deformed_mesh","get_show_deformed_mesh");
-
-    ClassDB::bind_method(D_METHOD("set_selected_vertex","value"), &CustomMesh::set_selected_vertex);
-    ClassDB::bind_method(D_METHOD("get_selected_vertex"), &CustomMesh::get_selected_vertex);
-    ADD_PROPERTY(PropertyInfo(Variant::INT,"selected_vertex"), "set_selected_vertex","get_selected_vertex");
-
-    ClassDB::bind_method(D_METHOD("set_deform_x","value"), &CustomMesh::set_deform_x);
-    ClassDB::bind_method(D_METHOD("get_deform_x"), &CustomMesh::get_deform_x);
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"deform_x"), "set_deform_x","get_deform_x");
-
-    ClassDB::bind_method(D_METHOD("set_deform_y","value"), &CustomMesh::set_deform_y);
-    ClassDB::bind_method(D_METHOD("get_deform_y"), &CustomMesh::get_deform_y);
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"deform_y"), "set_deform_y","get_deform_y");
-
-	#define BIND_VECTOR2_ARRAY(prop) \
-		ClassDB::bind_method(D_METHOD("set_"#prop,"value"), &CustomMesh::set_##prop); \
-		ClassDB::bind_method(D_METHOD("get_"#prop), &CustomMesh::get_##prop); \
-		ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR2_ARRAY,#prop), "set_"#prop, "get_"#prop)
-	#define BIND_INT32_ARRAY(prop) \
-		ClassDB::bind_method(D_METHOD("set_"#prop,"value"), &CustomMesh::set_##prop); \
-		ClassDB::bind_method(D_METHOD("get_"#prop), &CustomMesh::get_##prop); \
-		ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY,#prop), "set_"#prop, "get_"#prop)
-
-
-
-	BIND_VECTOR2_ARRAY(original_vertices);
-	BIND_VECTOR2_ARRAY(base_vertices);
-	BIND_VECTOR2_ARRAY(deformed_vertices);
-	BIND_VECTOR2_ARRAY(internal_vertices);
-    BIND_VECTOR2_ARRAY(interpolated_vertices);
-	BIND_INT32_ARRAY(triangles);
-}
 
 Ref<DeformLayer> CustomMesh::get_layer(int index) const {
     if (index < 0 || index >= (int)deform_layers.size()) return Ref<DeformLayer>();
@@ -211,8 +326,6 @@ Ref<DeformLayer> CustomMesh::get_layer(int index) const {
 
 void CustomMesh::set_layer(int index, const Ref<DeformLayer> &layer) {
     if (!layer.is_valid()) return;
-
-    // Expand layers if needed
     while (index >= (int)deform_layers.size()) {
         add_deform_layer();
     }
@@ -310,16 +423,10 @@ int CustomMesh::get_layer_count() const {
 
 void CustomMesh::add_internal_point(Vector2 p) {
     std::lock_guard<std::recursive_mutex> lock(deform_mutex);
-
-    // Add to internal_vertices
     internal_vertices.append(p);
-
-    // Also add to original and deformed vertices so they are drawn
     original_vertices.append(p);
     deformed_vertices.append(p);
-    interpolated_vertices.append(p); // optional if using layers
-
-    // Re-triangulate including internal points
+    interpolated_vertices.append(p);
     triangles = Geometry2D::get_singleton()->triangulate_delaunay(original_vertices);
 
     _vertices_dirty.store(true);
@@ -360,8 +467,6 @@ void CustomMesh::sync_deformation_arrays() {
     std::lock_guard<std::recursive_mutex> lock(deform_mutex);
 
     int n = original_vertices.size();
-
-    // Helper to sync a single PackedVector2Array
     auto ensure_size = [&](PackedVector2Array &arr) {
         while (arr.size() < n) {
             arr.append(original_vertices[arr.size()]);
@@ -369,7 +474,6 @@ void CustomMesh::sync_deformation_arrays() {
         if (arr.size() > n) arr.resize(n);
     };
 
-    // Sync each deform layer
     for (auto &layer_ref : deform_layers) {
         if (!layer_ref.is_valid()) continue;
         DeformLayer *layer = layer_ref.ptr();
@@ -385,15 +489,12 @@ void CustomMesh::sync_deformation_arrays() {
         ensure_size(layer->bottom_left);
         ensure_size(layer->bottom_middle);
         ensure_size(layer->bottom_right);
-
-        // Optional: keep a flat copy if needed
         layer->vertices.resize(n);
         for (int i = 0; i < n; ++i) {
             layer->vertices[i] = original_vertices[i];
         }
     }
 
-    // Sync interpolated vertices
     if (interpolated_vertices.size() != n) {
         interpolated_vertices.resize(n);
         for (int i = 0; i < n; ++i) {
@@ -431,8 +532,8 @@ Vector2 CustomMesh::apply_wobble_to_deformer( const Vector2 &wobble,double delta
 
     Vector2 target_pos((wobble.x / (2.0 * safe_amp.x)) + 0.5,
                        (wobble.y / (2.0 * safe_amp.y)) + 0.5);
-    last_deform_pos.x = move_toward_fast(last_deform_pos.x, target_pos.x, float(lerp_speed * delta));
-    last_deform_pos.y = move_toward_fast(last_deform_pos.y, target_pos.y, float(lerp_speed * delta));
+    last_deform_pos.x = Math::lerp(float(last_deform_pos.x), float(target_pos.x), float(lerp_speed));
+    last_deform_pos.y = Math::lerp(float(last_deform_pos.y), float(target_pos.y), float(lerp_speed));
 
     return last_deform_pos;
 }
@@ -449,7 +550,7 @@ for (auto &layer_ref : deform_layers) {
     if (!layer_ref.is_valid()) continue;
     DeformLayer *layer = layer_ref.ptr();
 
-    if (preview_physics | layer->motion == DeformLayer::MotionType::CUSTOM) {
+    if (preview_physics || layer->motion == DeformLayer::MotionType::CUSTOM) {
         layer->strength   = global_target.x;
         layer->strength_v = global_target.y;
         layer->velocity   = 0.f;
@@ -483,11 +584,9 @@ for (auto &layer_ref : deform_layers) {
     layer->strength_v += layer->velocity_v * float(delta);
     apply_bounce_modifier(*layer , delta);
 
-}
-
+    }
     PackedVector2Array temp_vertices = original_vertices;
 
-    
     for (int i = 0; i < deform_layers.size(); ++i) {
         const Ref<DeformLayer> &layer_ref = deform_layers[i];
         if (!layer_ref.is_valid()) continue;
@@ -520,6 +619,92 @@ for (auto &layer_ref : deform_layers) {
     }
 
     interpolated_vertices = temp_vertices;
+
+    // Glue
+    for (int i = 0; i < glues.size(); ++i) {
+        int glue_id = glues[i];
+        GlueGroup *g = nullptr;
+        for (auto &g_ref : glue_groups) {
+            if (!g_ref.is_valid()) continue;
+            if (g_ref->id != glue_id) continue;
+            g = g_ref.ptr();
+            break;
+        }
+        if (!g || g->indices.size() < 2) continue;
+
+        Vector2 delta = interpolated_vertices[g->indices[0]] - g->last_position;
+        g->last_position = interpolated_vertices[g->indices[0]];
+
+        for (int j = 1; j < g->indices.size(); ++j) {
+            int vi = g->indices[j];
+            float w = (j < g->weights.size()) ? g->weights[j].x : 1.0f;
+            interpolated_vertices[vi] += delta * w;
+        }
+    }
+
+for (int i = 0; i < warps.size(); ++i) {
+    int warp_id = warps[i];
+    //print_line(String("Warp ID: {0}").format(Array::make(warp_id)));
+
+    CustomMesh* target_mesh = nullptr;
+
+    for (CustomMesh* mesh : mesh_registry) {
+        if (!mesh) continue;
+        //print_line(String("Checking mesh: {0}, mesh_id: {1}").format(Array::make((uint64_t)mesh, mesh->mesh_id)));
+
+        if (mesh->mesh_id == warp_id) {
+            target_mesh = mesh;
+            //print_line(String("Found target mesh for warp_id: {0}").format(Array::make(warp_id)));
+            break;
+        }
+    }
+
+    if (!target_mesh) {
+        //print_line(String("No target mesh found for warp_id: {0}").format(Array::make(warp_id)));
+        continue;
+    }
+
+        for (int vi = 0; vi < temp_vertices.size(); ++vi) {
+            Vector2 total_delta;
+
+            // find closest vertex in target_mesh for this vertex
+            int closest_idx = -1;
+            float closest_dist = 1e10;
+            for (int ti = 0; ti < target_mesh->original_vertices.size(); ++ti) {
+                float d = temp_vertices[vi].distance_to(target_mesh->original_vertices[ti]);
+                if (d < closest_dist) {
+                    closest_dist = d;
+                    closest_idx = ti;
+                }
+            }
+            if (closest_idx == -1) continue;
+
+            for (auto &ext_layer_ref : target_mesh->deform_layers) {
+                if (!ext_layer_ref.is_valid()) continue;
+                const DeformLayer &ext_layer = *ext_layer_ref.ptr();
+
+                Vector2 layer_delta;
+                if (sample_layer_point(ext_layer, closest_idx, ext_layer.strength,
+                                    ext_layer.strength_v, layer_delta)) {
+                    if (ext_layer.motion == DeformLayer::MotionType::BOUNCY) {
+                        Vector2 bounce_delta;
+                        if (sample_layer_point(ext_layer, closest_idx,
+                                            ext_layer.bounce_lerp.x, ext_layer.bounce_lerp.y,
+                                            bounce_delta)) {
+                            total_delta += bounce_delta * ext_layer.target_strength;
+                        }
+                    } else {
+                        total_delta += layer_delta * ext_layer.target_strength;
+                    }
+                }
+            }
+
+            temp_vertices[vi] += total_delta;
+        }
+    }
+
+    interpolated_vertices = temp_vertices;
+
     _vertices_dirty.store(true);
     queue_redraw();
 }
@@ -673,4 +858,3 @@ bool CustomMesh::sample_layer_point(const DeformLayer &layer, int i,float u_in, 
     out = result;
     return true;
 }
-
