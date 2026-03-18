@@ -727,9 +727,23 @@ for (auto &layer_ref : deform_layers) {
         }
     }
 
-for (int i = 0; i < warps.size(); ++i) {
-    int warp_id = warps[i];
-    CustomMesh* target_mesh = nullptr;
+float radius = 75.0f;
+int max_neighbors = 4;
+
+PackedVector2Array source_vertices = temp_vertices;
+
+for (int vi = 0; vi < temp_vertices.size(); ++vi) {
+
+    Vector2 accumulated_delta;
+    Vector2 current_pos = source_vertices[vi];
+
+    std::vector<CustomMesh*> to_process;
+    std::vector<CustomMesh*> processed;
+
+
+    for (int i = 0; i < warps.size(); ++i) {
+        int warp_id = warps[i];
+        CustomMesh* target_mesh = nullptr;
 
         for (CustomMesh* mesh : mesh_registry) {
             if (!mesh) continue;
@@ -738,27 +752,51 @@ for (int i = 0; i < warps.size(); ++i) {
                 break;
             }
         }
-        if (!target_mesh) {
-            continue;
-        }
-
-        float radius = 75.0f;
-        int max_neighbors = 4;
-
-        for (int vi = 0; vi < temp_vertices.size(); ++vi) {
-            Vector2 total_delta;
-
-            sample_target_mesh_soft(
-                target_mesh,
-                temp_vertices[vi],
-                radius,
-                max_neighbors,
-                total_delta
-            );
-
-            temp_vertices[vi] += total_delta;
+        if (target_mesh) {
+            to_process.push_back(target_mesh);
         }
     }
+
+    while (!to_process.empty()) {
+        CustomMesh* current = to_process.back();
+        to_process.pop_back();
+
+        bool _processed = false;
+        for (CustomMesh* p : processed) {
+            if (p == current) {
+                _processed = true;
+                break;
+            }
+        }
+        if (_processed) continue;
+        processed.push_back(current);
+
+        for (int wi = 0; wi < current->warps.size(); ++wi) {
+            int next_warp_id = current->warps[wi];
+            CustomMesh* next_target = nullptr;
+
+            for (int mi = 0; mi < mesh_registry.size(); ++mi) {
+                CustomMesh* mesh = mesh_registry[mi];
+                if (!mesh) continue;
+                if (mesh->mesh_id == next_warp_id) {
+                    next_target = mesh;
+                    break;
+                }
+            }
+
+            if (next_target)
+                to_process.push_back(next_target);
+        }
+
+
+        Vector2 total_delta;
+        sample_target_mesh(current,current_pos + accumulated_delta, radius, max_neighbors, total_delta);
+
+        accumulated_delta += total_delta;
+    }
+
+    temp_vertices[vi] += accumulated_delta;
+}
 
     interpolated_vertices = temp_vertices;
 
