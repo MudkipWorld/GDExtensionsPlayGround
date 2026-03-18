@@ -538,6 +538,91 @@ Vector2 CustomMesh::apply_wobble_to_deformer( const Vector2 &wobble,double delta
     return last_deform_pos;
 }
 
+
+void CustomMesh::sample_target_mesh(const CustomMesh* target_mesh,const Vector2& position,float radius,int max_neighbors,Vector2& out_delta) {
+    float radius_sq = radius * radius;
+
+    struct Neighbor {
+        int index;
+        float dist_sq;
+    };
+
+    std::vector<Neighbor> neighbors;
+    neighbors.reserve(16);
+
+    for (int ti = 0; ti < target_mesh->original_vertices.size(); ++ti) {
+        float d_sq = position.distance_squared_to(target_mesh->original_vertices[ti]);
+
+        if (d_sq <= radius_sq) {
+            neighbors.push_back({ti, d_sq});
+        }
+    }
+
+    if (neighbors.empty()) {
+        for (int ti = 0; ti < target_mesh->original_vertices.size(); ++ti) {
+            float d_sq = position.distance_squared_to(target_mesh->original_vertices[ti]);
+            neighbors.push_back({ti, d_sq});
+        }
+
+        std::partial_sort(
+            neighbors.begin(),
+            neighbors.begin() + std::min(max_neighbors, (int)neighbors.size()),
+            neighbors.end(),
+            [](const Neighbor& a, const Neighbor& b) {
+                return a.dist_sq < b.dist_sq;
+            }
+        );
+
+        neighbors.resize(std::min(max_neighbors, (int)neighbors.size()));
+    }
+
+    Vector2 total_delta;
+    float total_weight = 0.0f;
+
+    for (const Neighbor& n : neighbors) {
+        float w = std::exp(-n.dist_sq / (radius_sq));
+
+        if (w < 1e-5f)
+            continue;
+
+        for (auto &ext_layer_ref : target_mesh->deform_layers) {
+            if (!ext_layer_ref.is_valid()) continue;
+            const DeformLayer &ext_layer = *ext_layer_ref.ptr();
+
+            Vector2 layer_delta;
+            if (!sample_layer_point(
+                    ext_layer,
+                    n.index,
+                    ext_layer.strength,
+                    ext_layer.strength_v,
+                    layer_delta))
+                continue;
+
+            if (ext_layer.motion == DeformLayer::MotionType::BOUNCY) {
+                Vector2 bounce_delta;
+                if (sample_layer_point(
+                        ext_layer,
+                        n.index,
+                        ext_layer.bounce_lerp.x,
+                        ext_layer.bounce_lerp.y,
+                        bounce_delta)) {
+                    total_delta += bounce_delta * ext_layer.target_strength * w;
+                    total_weight += w;
+                }
+            } else {
+                total_delta += layer_delta * ext_layer.target_strength * w;
+                total_weight += w;
+            }
+        }
+    }
+
+    if (total_weight > 0.0f)
+        out_delta = total_delta / total_weight;
+    else
+        out_delta = Vector2(0, 0);
+}
+
+
 void CustomMesh::update_physics(double delta, bool preview_physics) {
     std::lock_guard<std::recursive_mutex> lock(deform_mutex);
 
@@ -644,60 +729,32 @@ for (auto &layer_ref : deform_layers) {
 
 for (int i = 0; i < warps.size(); ++i) {
     int warp_id = warps[i];
-    //print_line(String("Warp ID: {0}").format(Array::make(warp_id)));
-
     CustomMesh* target_mesh = nullptr;
 
-    for (CustomMesh* mesh : mesh_registry) {
-        if (!mesh) continue;
-        //print_line(String("Checking mesh: {0}, mesh_id: {1}").format(Array::make((uint64_t)mesh, mesh->mesh_id)));
-
-        if (mesh->mesh_id == warp_id) {
-            target_mesh = mesh;
-            //print_line(String("Found target mesh for warp_id: {0}").format(Array::make(warp_id)));
-            break;
+        for (CustomMesh* mesh : mesh_registry) {
+            if (!mesh) continue;
+            if (mesh->mesh_id == warp_id) {
+                target_mesh = mesh;
+                break;
+            }
         }
-    }
+        if (!target_mesh) {
+            continue;
+        }
 
-    if (!target_mesh) {
-        //print_line(String("No target mesh found for warp_id: {0}").format(Array::make(warp_id)));
-        continue;
-    }
+        float radius = 75.0f;
+        int max_neighbors = 4;
 
         for (int vi = 0; vi < temp_vertices.size(); ++vi) {
             Vector2 total_delta;
 
-            // find closest vertex in target_mesh for this vertex
-            int closest_idx = -1;
-            float closest_dist = 1e10;
-            for (int ti = 0; ti < target_mesh->original_vertices.size(); ++ti) {
-                float d = temp_vertices[vi].distance_to(target_mesh->original_vertices[ti]);
-                if (d < closest_dist) {
-                    closest_dist = d;
-                    closest_idx = ti;
-                }
-            }
-            if (closest_idx == -1) continue;
-
-            for (auto &ext_layer_ref : target_mesh->deform_layers) {
-                if (!ext_layer_ref.is_valid()) continue;
-                const DeformLayer &ext_layer = *ext_layer_ref.ptr();
-
-                Vector2 layer_delta;
-                if (sample_layer_point(ext_layer, closest_idx, ext_layer.strength,
-                                    ext_layer.strength_v, layer_delta)) {
-                    if (ext_layer.motion == DeformLayer::MotionType::BOUNCY) {
-                        Vector2 bounce_delta;
-                        if (sample_layer_point(ext_layer, closest_idx,
-                                            ext_layer.bounce_lerp.x, ext_layer.bounce_lerp.y,
-                                            bounce_delta)) {
-                            total_delta += bounce_delta * ext_layer.target_strength;
-                        }
-                    } else {
-                        total_delta += layer_delta * ext_layer.target_strength;
-                    }
-                }
-            }
+            sample_target_mesh_soft(
+                target_mesh,
+                temp_vertices[vi],
+                radius,
+                max_neighbors,
+                total_delta
+            );
 
             temp_vertices[vi] += total_delta;
         }

@@ -298,6 +298,7 @@ public:
 
     void set_deform_y(float p);
     float get_deform_y() const;
+    void sample_target_mesh(const CustomMesh* target_mesh,const Vector2& position,float radius,int max_neighbors,Vector2& out_delta);
 
     void set_original_vertices(const PackedVector2Array &p);
     PackedVector2Array get_original_vertices() const;
