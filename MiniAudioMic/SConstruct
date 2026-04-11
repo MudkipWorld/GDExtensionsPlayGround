@@ -2,6 +2,7 @@ import os
 import sys
 from SCons.Script import *
 
+
 platform = ARGUMENTS.get("platform", sys.platform)
 build_type = ARGUMENTS.get("build", "debug")
 
@@ -10,12 +11,15 @@ godot_cpp_path = "../godot-cpp"
 
 sources = [
     "register_types.cpp",
-    "CustomMesh.cpp",
+    "mini_audio.cpp",
+    "miniaudio.c",
+    "kiss_fft.c"
 ]
 
 def fixpath(p):
     """Normalize path to use forward slashes (MSYS-safe)."""
     return os.path.abspath(p).replace("\\", "/")
+
 
 host_platform = sys.platform.lower()
 is_wsl = "microsoft" in os.uname().release.lower() if hasattr(os, "uname") else False
@@ -23,27 +27,17 @@ output_dir = ""
 
 if platform.startswith("win"):
     if host_platform.startswith("win"):
+
         cxx = "g++"
         cc = "gcc"
     else:
+
         cxx = "x86_64-w64-mingw32-g++"
         cc = "x86_64-w64-mingw32-gcc"
 elif platform.startswith("linux"):
     cxx = "g++"
     cc = "gcc"
-elif platform.startswith("mac"): #still can't get it working
-    osxcross_sdk = ARGUMENTS.get("osxcross_sdk", "23.5")
-    macos_version_min = ARGUMENTS.get("macos_version_min", "10.15")
-    
-    osxcross_bin_path = "/home/pc/osxcross/target/bin"
 
-    cxx = os.path.join(osxcross_bin_path, f"x86_64-apple-darwin{osxcross_sdk}-clang++")
-    cc  = os.path.join(osxcross_bin_path, f"x86_64-apple-darwin{osxcross_sdk}-clang")
-
-    print(f"Using osxcross compiler: {cxx}")
-
-
-print(f"Host: {host_platform}, Target: {platform}, Using compiler: {cxx}")
 
 
 env = Environment(tools=["mingw", "default"])
@@ -81,13 +75,16 @@ if platform.startswith("win"):
     env.Append(LIBS=[
         f"godot-cpp.{lib_suffix}",
         "user32",
-        "winpthread"
+        "winpthread",
     ])
 
     env.Append(CXXFLAGS=["-std=c++17", "-O2", "-fPIC"])
     env.Append(CPPDEFINES=["NOMINMAX"])
     env.Append(LINKFLAGS=["-shared"])
 
+
+
+    # Copy runtime DLLs
     required_dlls = ["libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll"]
     for dll in required_dlls:
         src_path = os.path.join(mingw_bin_path, dll)
@@ -120,7 +117,7 @@ elif platform.startswith("linux"):
 
     env.Append(LIBS=[
         f"godot-cpp.{lib_suffix}",
-        "pthread"
+        "pthread",
     ])
 
     env.Append(LINKFLAGS=[
@@ -130,62 +127,10 @@ elif platform.startswith("linux"):
     env.Append(CXXFLAGS=["-std=c++17", "-O2", "-fPIC"])
 
 
-elif platform == "macos" or platform == "darwin":
+target_name = (
+    f"bin/windows/MiniAudio.{lib_suffix}.dll"
+    if platform.startswith("win")
+    else f"bin/linux/MiniAudio.{lib_suffix}.so"
+)
 
-    print("Using osxcross compiler: /home/pc/osxcross/target/bin/x86_64-apple-darwin23.5-clang++")
-
-    env["CC"] = "/home/pc/osxcross/target/bin/x86_64-apple-darwin23.5-clang"
-    env["CXX"] = "/home/pc/osxcross/target/bin/x86_64-apple-darwin23.5-clang++"
-
-    env["LINK"]  = env["CXX"]
-    env["SHLINK"] = env["CXX"]
-    env["SHLIBSUFFIX"] = ".dylib"
-
-    macos_min = "10.15"
-
-    lib_suffix = (
-        "macos.template_debug.x86_64"
-        if build_type == "debug"
-        else "macos.template_release.x86_64"
-    )
-
-    output_dir = "bin/macos"
-    os.makedirs(output_dir, exist_ok=True)
-
-    env.Append(CPPPATH=[
-        f"{fixpath(godot_cpp_path)}/include",
-        f"{fixpath(godot_cpp_path)}/include/godot_cpp",
-        f"{fixpath(godot_cpp_path)}/gen/include",
-        f"{fixpath(godot_cpp_path)}/gdextension",
-        "src"
-    ])
-
-    env.Append(CXXFLAGS=[
-        "-std=c++17",
-        "-fPIC",
-        "-stdlib=libc++",
-        f"-mmacosx-version-min={macos_min}",
-        "-arch", "x86_64"
-    ])
-    env.Append(SHLINKFLAGS=[
-        "-dynamiclib",
-        "-stdlib=libc++",
-        f"-mmacosx-version-min={macos_min}",
-        "-arch", "x86_64",
-        "-undefined", "dynamic_lookup"
-    ])
-
-    target = f"{output_dir}/CustomMesh.{lib_suffix}.dylib"
-    env.SharedLibrary(target=target, source=sources)
-
-
-
-    
-if not  platform.startswith("macos"):
-    target_name = (
-        f"bin/windows/CustomMesh.{lib_suffix}.dll"
-        if platform.startswith("win")
-        else f"bin/linux/CustomMesh.{lib_suffix}.so"
-    )
-
-    env.SharedLibrary(target=target_name, source=sources)
+env.SharedLibrary(target=target_name, source=sources)
