@@ -1,7 +1,26 @@
 
 #include "mini_audio.h"
 
+#include <godot_cpp/variant/packed_byte_array.hpp>
+#include <cstring>
+
 using namespace godot;
+
+// Convert a NUL-terminated byte string to a Godot String, decoding it as UTF-8.
+// NOTE: godot-cpp's String(const char *) constructor decodes the input as
+// Latin-1 (byte-per-codepoint), which corrupts any non-ASCII content (e.g.
+// Chinese device names such as "麦克风"). MiniAudio always provides device
+// names as UTF-8, so we must decode explicitly as UTF-8 here.
+static String string_from_utf8(const char *p_bytes) {
+	PackedByteArray bytes;
+	const size_t len = p_bytes != nullptr ? strlen(p_bytes) : 0;
+	bytes.resize((int64_t)len);
+	if (len > 0) {
+		memcpy(bytes.ptrw(), p_bytes, len);
+	}
+	return bytes.get_string_from_utf8();
+}
+
 
 static float latest_sample = 0.0f; 
 
@@ -211,7 +230,7 @@ String MiniAudio::get_device_name(){
     ma_result err = ma_device_get_name(&device, ma_device_type_capture, dev_name, sizeof(dev_name), &name_len);
 
     if (err == MA_SUCCESS){
-        return String(dev_name);
+        return string_from_utf8(dev_name);
     }
 
     return "";
@@ -238,7 +257,7 @@ PackedStringArray MiniAudio::get_device_names() {
     }
 
     for (ma_uint32 i = 0; i < captureCount; i++) {
-        names.append(String(captureInfos[i].name));
+        names.append(string_from_utf8(captureInfos[i].name));
     }
 
     ma_context_uninit(&temp_context);

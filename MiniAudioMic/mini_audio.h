@@ -15,6 +15,7 @@
 #include <godot_cpp/core/math.hpp>
 #include <mutex>
 #include <algorithm>
+#include <vector>
 
 #include <stdlib.h>
 #include <stdio.h>
