@@ -31,22 +31,15 @@ if platform.startswith("win"):
 elif platform.startswith("linux"):
     cxx = "g++"
     cc = "gcc"
-elif platform.startswith("mac"): #still can't get it working
-    osxcross_sdk = ARGUMENTS.get("osxcross_sdk", "23.5")
-    macos_version_min = ARGUMENTS.get("macos_version_min", "10.15")
-    
-    osxcross_bin_path = "/home/pc/osxcross/target/bin"
-
-    cxx = os.path.join(osxcross_bin_path, f"x86_64-apple-darwin{osxcross_sdk}-clang++")
-    cc  = os.path.join(osxcross_bin_path, f"x86_64-apple-darwin{osxcross_sdk}-clang")
-
-    print(f"Using osxcross compiler: {cxx}")
+elif platform.startswith("mac"):
+    cxx = "clang++"
+    cc = "clang"
 
 
 print(f"Host: {host_platform}, Target: {platform}, Using compiler: {cxx}")
 
 
-env = Environment(tools=["mingw", "default"])
+env = Environment(tools=["default"] if platform.startswith("mac") else ["mingw", "default"])
 env["CXX"] = cxx
 env["CC"] = cc
 env["ENV"]["PATH"] = os.environ["PATH"]
@@ -130,62 +123,33 @@ elif platform.startswith("linux"):
     env.Append(CXXFLAGS=["-std=c++17", "-O2", "-fPIC"])
 
 
-elif platform == "macos" or platform == "darwin":
-
-    print("Using osxcross compiler: /home/pc/osxcross/target/bin/x86_64-apple-darwin23.5-clang++")
-
-    env["CC"] = "/home/pc/osxcross/target/bin/x86_64-apple-darwin23.5-clang"
-    env["CXX"] = "/home/pc/osxcross/target/bin/x86_64-apple-darwin23.5-clang++"
-
-    env["LINK"]  = env["CXX"]
-    env["SHLINK"] = env["CXX"]
-    env["SHLIBSUFFIX"] = ".dylib"
-
-    macos_min = "10.15"
-
-    lib_suffix = (
-        "macos.template_debug.x86_64"
-        if build_type == "debug"
-        else "macos.template_release.x86_64"
-    )
+elif platform.startswith("mac"):
+    # Use godot-cpp's own build environment so the extension is compiled with the
+    # same defines and flags as the bindings (MACOS_ENABLED, HOT_RELOAD_ENABLED, ...).
+    # Mismatched defines break the link (e.g. thread_local symbols in wrapped.hpp).
+    ARGUMENTS["platform"] = "macos"
+    ARGUMENTS["target"] = "template_debug" if build_type == "debug" else "template_release"
+    ARGUMENTS.setdefault("arch", "universal")
+    ARGUMENTS.setdefault("macos_deployment_target", "10.15")
+    env = SConscript(f"{godot_cpp_path}/SConstruct")
 
     output_dir = "bin/macos"
     os.makedirs(output_dir, exist_ok=True)
+    lib_suffix = env["suffix"].lstrip(".")
+    env["SHLIBPREFIX"] = ""
 
-    env.Append(CPPPATH=[
-        f"{fixpath(godot_cpp_path)}/include",
-        f"{fixpath(godot_cpp_path)}/include/godot_cpp",
-        f"{fixpath(godot_cpp_path)}/gen/include",
-        f"{fixpath(godot_cpp_path)}/gdextension",
-        "src"
-    ])
+    env.Append(CPPPATH=["src"])
+    env.Append(LINKFLAGS=["-framework", "CoreFoundation"])
 
-    env.Append(CXXFLAGS=[
-        "-std=c++17",
-        "-fPIC",
-        "-stdlib=libc++",
-        f"-mmacosx-version-min={macos_min}",
-        "-arch", "x86_64"
-    ])
-    env.Append(SHLINKFLAGS=[
-        "-dynamiclib",
-        "-stdlib=libc++",
-        f"-mmacosx-version-min={macos_min}",
-        "-arch", "x86_64",
-        "-undefined", "dynamic_lookup"
-    ])
+target_name = (
+    f"bin/windows/CustomMesh.{lib_suffix}.dll"
+    if platform.startswith("win")
+    else f"bin/macos/CustomMesh.{lib_suffix}.dylib"
+    if platform.startswith("mac")
+    else f"bin/linux/CustomMesh.{lib_suffix}.so"
+)
 
-    target = f"{output_dir}/CustomMesh.{lib_suffix}.dylib"
-    env.SharedLibrary(target=target, source=sources)
-
-
-
-    
-if not  platform.startswith("macos"):
-    target_name = (
-        f"bin/windows/CustomMesh.{lib_suffix}.dll"
-        if platform.startswith("win")
-        else f"bin/linux/CustomMesh.{lib_suffix}.so"
-    )
-
-    env.SharedLibrary(target=target_name, source=sources)
+library = env.SharedLibrary(target=target_name, source=sources)
+if platform.startswith("mac"):
+    # godot-cpp calls Default() on its own library, so the extension must be a default target too.
+    Default(library)

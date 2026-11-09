@@ -1,0 +1,75 @@
+name: Build macOS
+
+# Builds the universal (arm64 + x86_64) macOS libraries of the extensions on
+# GitHub's macOS runners, so they can be built and released without owning a
+# Mac. The resulting dylibs are uploaded as workflow artifacts.
+
+on:
+  push:
+    paths:
+      - "MiniAudioMic/**"
+      - "CustomMeshDeform/**"
+      - ".github/workflows/build-macos.yml"
+  pull_request:
+    paths:
+      - "MiniAudioMic/**"
+      - "CustomMeshDeform/**"
+      - ".github/workflows/build-macos.yml"
+  workflow_dispatch:
+
+env:
+  # Godot C++ bindings the extensions are built against.
+  GODOT_CPP_REF: godot-4.5-stable
+
+jobs:
+  build:
+    name: ${{ matrix.extension.name }} ${{ matrix.build }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [debug, release]
+        extension:
+          - name: MiniAudio
+            dir: MiniAudioMic
+            symbol: mini_audio_library_init
+          - name: CustomMesh
+            dir: CustomMeshDeform
+            symbol: custom_mesh_library_init
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout godot-cpp
+        uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot-cpp
+          ref: ${{ env.GODOT_CPP_REF }}
+          path: godot-cpp
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install SCons
+        run: python -m pip install scons
+
+      - name: Build
+        working-directory: ${{ matrix.extension.dir }}
+        run: scons platform=macos build=${{ matrix.build }} -j"$(sysctl -n hw.ncpu)"
+
+      - name: Verify library
+        working-directory: ${{ matrix.extension.dir }}/bin/macos
+        run: |
+          lib="${{ matrix.extension.name }}.macos.template_${{ matrix.build }}.universal.dylib"
+          lipo "$lib" -verify_arch arm64 x86_64
+          nm -gU "$lib" | grep ${{ matrix.extension.symbol }}
+          otool -L "$lib"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.extension.name }}-macos-${{ matrix.build }}
+          path: ${{ matrix.extension.dir }}/bin/macos/${{ matrix.extension.name }}.macos.template_${{ matrix.build }}.universal.dylib
+          if-no-files-found: error

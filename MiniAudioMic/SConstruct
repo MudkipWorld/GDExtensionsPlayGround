@@ -37,10 +37,13 @@ if platform.startswith("win"):
 elif platform.startswith("linux"):
     cxx = "g++"
     cc = "gcc"
+elif platform.startswith("mac"):
+    cxx = "clang++"
+    cc = "clang"
 
 
 
-env = Environment(tools=["mingw", "default"])
+env = Environment(tools=["default"] if platform.startswith("mac") else ["mingw", "default"])
 env["CXX"] = cxx
 env["CC"] = cc
 env["ENV"]["PATH"] = os.environ["PATH"]
@@ -126,11 +129,34 @@ elif platform.startswith("linux"):
     ])
     env.Append(CXXFLAGS=["-std=c++17", "-O2", "-fPIC"])
 
+elif platform.startswith("mac"):
+    # Use godot-cpp's own build environment so the extension is compiled with the
+    # same defines and flags as the bindings (MACOS_ENABLED, HOT_RELOAD_ENABLED, ...).
+    # Mismatched defines break the link (e.g. thread_local symbols in wrapped.hpp).
+    ARGUMENTS["platform"] = "macos"
+    ARGUMENTS["target"] = "template_debug" if build_type == "debug" else "template_release"
+    ARGUMENTS.setdefault("arch", "universal")
+    ARGUMENTS.setdefault("macos_deployment_target", "10.15")
+    env = SConscript(f"{godot_cpp_path}/SConstruct")
+
+    output_dir = "bin/macos"
+    os.makedirs(output_dir, exist_ok=True)
+    lib_suffix = env["suffix"].lstrip(".")
+    env["SHLIBPREFIX"] = ""
+
+    env.Append(CPPPATH=["src"])
+    env.Append(LINKFLAGS=["-framework", "CoreFoundation", "-framework", "CoreAudio", "-framework", "AudioToolbox", "-framework", "AudioUnit"])
+
 
 target_name = (
     f"bin/windows/MiniAudio.{lib_suffix}.dll"
     if platform.startswith("win")
+    else f"bin/macos/MiniAudio.{lib_suffix}.dylib"
+    if platform.startswith("mac")
     else f"bin/linux/MiniAudio.{lib_suffix}.so"
 )
 
-env.SharedLibrary(target=target_name, source=sources)
+library = env.SharedLibrary(target=target_name, source=sources)
+if platform.startswith("mac"):
+    # godot-cpp calls Default() on its own library, so the extension must be a default target too.
+    Default(library)
